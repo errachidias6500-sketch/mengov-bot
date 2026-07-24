@@ -1,0 +1,14 @@
+name = "mengov-bot"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+BOT_TOKEN = "8926002491:AAFjsWyBvV3Ur5D8UffgpV-jL4AClaTS1fY"
+CHAT_ID = "1682028544"
+
+[[kv_namespaces]]
+binding = "SENT_IDS"
+id = "8f488a53dbbd44c38a8fbe4978f04675"
+
+[triggers]
+crons = ["*/5 * * * *"]
