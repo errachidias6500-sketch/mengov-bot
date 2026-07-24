@@ -1,14 +1,18 @@
 import os
+import sys
 import json
 import time
 import logging
 import threading
 import feedparser
 import requests
+from dotenv import load_dotenv
 from flask import Flask
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pathlib import Path
+
+load_dotenv(Path(__file__).parent / ".env")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -228,6 +232,12 @@ def main():
         return
     if not CHAT_ID:
         logger.error("TELEGRAM_CHAT_ID not set!")
+        return
+
+    if "--once" in sys.argv:
+        logger.info("Running single check...")
+        check_all()
+        logger.info("Done.")
         return
 
     logger.info(f"Bot started. Checking every {CHECK_INTERVAL} seconds.")
