@@ -206,7 +206,7 @@ public class Main {
     private static void handleTelegramMessage(Map<String, Object> message) {
         Map<String, Object> chat = (Map<String, Object>) message.get("chat");
         if (chat == null) return;
-        String msgChatId = String.valueOf(chat.get("id"));
+        String msgChatId = String.valueOf(((Number) chat.get("id")).longValue());
         String text = message.get("text") != null ? String.valueOf(message.get("text")).trim() : "";
         String firstName = message.get("from") != null ? String.valueOf(((Map<String, Object>) message.get("from")).get("first_name")) : "";
 
