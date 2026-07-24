@@ -47,6 +47,10 @@ public class Main {
 
     private static String botToken;
     private static String chatId;
+    private static long lastUpdateId = 0;
+    private static volatile boolean running = true;
+    private static int totalSent = 0;
+    private static int totalChecks = 0;
 
     private static String now() {
         return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
@@ -80,25 +84,35 @@ public class Main {
 
         System.out.println("=== MEN.GOV.MA Telegram Bot (Java) ===");
         System.out.println("Monitoring RSS feed + " + PAGES.size() + " pages");
-        System.out.println("Checking every 5 minutes...\n");
-
-        checkAll();
+        System.out.println("Checking every 5 minutes...");
+        System.out.println("Commands: /start /check /status /reset");
+        System.out.println("Bot started at " + now() + "\n");
 
         if (args.length > 0 && args[0].equals("--once")) {
+            checkAll();
             System.out.println("Single run mode. Exiting.");
             return;
         }
 
+        checkAll();
+
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(Main::checkAll, 5, 5, TimeUnit.MINUTES);
 
+        Thread pollThread = new Thread(Main::pollUpdates, "telegram-poll");
+        pollThread.setDaemon(true);
+        pollThread.start();
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            running = false;
             scheduler.shutdownNow();
             saveSentIds();
         }));
+
+        System.out.println("[" + now() + "] Bot is running. Send /start to your bot on Telegram.");
     }
 
-    private static void checkAll() {
+    private static int checkAll() {
         System.out.println("[" + now() + "] Checking for new items...");
         int count = 0;
 
@@ -108,6 +122,9 @@ public class Main {
             count += checkScrapePage(page).size();
         }
 
+        totalChecks++;
+        totalSent += count;
+
         if (count == 0) {
             System.out.println("[" + now() + "] No new items found");
         } else {
@@ -115,6 +132,127 @@ public class Main {
         }
 
         saveSentIds();
+        return count;
+    }
+
+    private static void pollUpdates() {
+        while (running) {
+            try {
+                String url = "https://api.telegram.org/bot" + botToken + "/getUpdates?offset=" + lastUpdateId + "&timeout=30&allowed_updates=[\"message\"]";
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .timeout(Duration.ofSeconds(35))
+                        .GET().build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() == 200) {
+                    Gson gson = new Gson();
+                    Map<String, Object> json = gson.fromJson(response.body(), Map.class);
+                    List<Map<String, Object>> results = (List<Map<String, Object>>) json.get("result");
+
+                    if (results != null) {
+                        for (Map<String, Object> update : results) {
+                            lastUpdateId = ((Number) update.get("update_id")).longValue() + 1;
+                            Map<String, Object> message = (Map<String, Object>) update.get("message");
+                            if (message != null) {
+                                handleTelegramMessage(message);
+                            }
+                        }
+                    }
+                } else {
+                    System.err.println("[" + now() + "] getUpdates error: " + response.statusCode());
+                    sleep(5000);
+                }
+            } catch (Exception e) {
+                System.err.println("[" + now() + "] Poll error: " + e.getMessage());
+                sleep(5000);
+            }
+        }
+    }
+
+    private static void handleTelegramMessage(Map<String, Object> message) {
+        Map<String, Object> chat = (Map<String, Object>) message.get("chat");
+        if (chat == null) return;
+        String msgChatId = String.valueOf(chat.get("id"));
+        String text = message.get("text") != null ? String.valueOf(message.get("text")).trim() : "";
+        String firstName = message.get("from") != null ? String.valueOf(((Map<String, Object>) message.get("from")).get("first_name")) : "";
+
+        System.out.println("[" + now() + "] Received from " + firstName + " (chat " + msgChatId + "): " + text);
+
+        if (text.equals("/start")) {
+            sendTelegram(msgChatId,
+                "\uD83D\uDCE3 <b>مرحباً " + firstName + "!</b>\n\n"
+                + "بوت متابعة أخبار وزارة التربية الوطنية.\n\n"
+                + "<b>الأوامر المتاحة:</b>\n"
+                + "/check - فحص فوري للأخبار\n"
+                + "/status - حالة البوت\n"
+                + "/reset - مسح السجل وإعادة الفحص\n"
+                + "/help - هذه الرسالة\n\n"
+                + "\uD83D\uDD14 يفحص تلقائياً كل 5 دقائق.");
+
+        } else if (text.equals("/help")) {
+            sendTelegram(msgChatId,
+                "<b>الأوامر:</b>\n"
+                + "/start - بدء البوت\n"
+                + "/check - فحص فوري\n"
+                + "/status - حالة البوت\n"
+                + "/reset - مسح السجل وفحص من جديد");
+
+        } else if (text.equals("/check")) {
+            sendTelegram(msgChatId, "\u23F3 جاري الفحص...");
+            int count = checkAll();
+            if (count == 0) {
+                sendTelegram(msgChatId, "\u2705 لا أخبار جديدة. كل شيء محدث.");
+            } else {
+                sendTelegram(msgChatId, "\uD83D\uDD14 تم إرسال " + count + " خبر/أخبار جديدة.");
+            }
+
+        } else if (text.equals("/status")) {
+            sendTelegram(msgChatId,
+                "\uD83D\uDCCA <b>حالة البوت</b>\n\n"
+                + "\uD83D\uDD50_started at: " + now() + "\n"
+                + "\uD83D\uDD04 فحوصات: " + totalChecks + "\n"
+                + "\uD83D\uDCE8 أخبار مرسلة: " + totalSent + "\n"
+                + "\uD83D\uDCCB أخبار مسجلة: " + sentIds.size() + "\n"
+                + "\uD83C\uDF10 مصادر: RSS + " + PAGES.size() + " صفحات\n"
+                + "\u23F0 التوقيت: كل 5 دقائق");
+
+        } else if (text.equals("/reset")) {
+            sentIds.clear();
+            saveSentIds();
+            sendTelegram(msgChatId, "\uD83D\uDD04 تم مسح السجل. جاري فحص جديد...");
+            int count = checkAll();
+            sendTelegram(msgChatId, "\u2705 تم. وُجد " + count + " خبر.");
+
+        } else if (!text.isEmpty() && text.startsWith("/")) {
+            sendTelegram(msgChatId, "\u2753 أمر غير معروف. أرسل /help للقائمة.");
+        }
+    }
+
+    private static void sendTelegram(String targetChatId, String text) {
+        try {
+            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
+            String json = new Gson().toJson(Map.of(
+                    "chat_id", targetChatId,
+                    "text", text,
+                    "parse_mode", "HTML",
+                    "disable_web_page_preview", true
+            ));
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                System.err.println("Telegram error: " + response.statusCode() + " " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to send: " + e.getMessage());
+        }
     }
 
     private static List<String> checkRss() {
@@ -213,31 +351,7 @@ public class Main {
     }
 
     private static void sendTelegram(String text) {
-        try {
-            String url = "https://api.telegram.org/bot" + botToken + "/sendMessage";
-            String json = new Gson().toJson(Map.of(
-                    "chat_id", chatId,
-                    "text", text,
-                    "parse_mode", "HTML",
-                    "disable_web_page_preview", true
-            ));
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(30))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200) {
-                System.out.println("[" + now() + "] Message sent");
-            } else {
-                System.err.println("Telegram error: " + response.statusCode() + " " + response.body());
-            }
-        } catch (Exception e) {
-            System.err.println("Failed to send: " + e.getMessage());
-        }
+        sendTelegram(chatId, text);
     }
 
     private static Set<String> loadSentIds() {
