@@ -125,18 +125,20 @@ def check_scrape_page(page_info, sent_ids):
         resp.encoding = "utf-8"
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        table = soup.find("table", class_="views-table")
-        if not table:
-            table = soup.find("table")
-        if not table:
-            return new_items
-
-        rows = table.find("tbody")
+        rows = soup.select("div.table-row")
+        if not rows:
+            tbody = soup.find("table", {"class": None})
+            if tbody:
+                tbody = tbody.find("tbody")
+            if tbody:
+                rows = tbody.find_all("tr")
         if not rows:
             return new_items
 
-        for tr in rows.find_all("tr")[:10]:
-            cells = tr.find_all("td")
+        for tr in rows[:10]:
+            cells = tr.find_all("div")
+            if len(cells) < 2:
+                cells = tr.find_all("td")
             if len(cells) < 2:
                 continue
 
@@ -148,6 +150,8 @@ def check_scrape_page(page_info, sent_ids):
                 a_tag = title_cell.find("a")
                 if a_tag:
                     title = a_tag.get_text(strip=True)
+                    if title in ("عرض التفاصيل", "عرض", ""):
+                        title = title_cell.get_text(strip=True).replace("عرض التفاصيل", "").strip()
                     href = a_tag.get("href", "")
                     if href.startswith("/"):
                         link = BASE_URL + href
