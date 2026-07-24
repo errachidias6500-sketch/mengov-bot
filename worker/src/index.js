@@ -109,30 +109,32 @@ async function sendTelegram(env, text, targetChatId) {
 
 async function checkAll(env) {
   let count = 0;
-  const sentIds = new Set();
-  const keys = await env.SENT_IDS.list();
-  for (const key of keys.keys) sentIds.add(key.name);
 
   try {
     const rssResp = await fetch(RSS_URL);
     const rssXml = await rssResp.text();
     const items = parseRssItems(rssXml);
 
-    for (const item of items) {
-      const id = item.guid || item.link || item.title;
-      if (sentIds.has(id)) continue;
+    const lastRssId = await env.SENT_IDS.get("last_rss_id");
+    const firstId = items.length > 0 ? (items[0].guid || items[0].link || items[0].title) : "";
 
-      const summary = item.description ? stripHtml(item.description).substring(0, 300) : "";
-      const msg = "\uD83D\uDCF0 <b>مستجدات | وزارة التربية الوطنية</b>\n\n"
-        + "\uD83D\uDD39 <b>العنوان:</b> " + item.title + "\n"
-        + (item.pubDate ? "\uD83D\uDCC5 <b>التاريخ:</b> " + item.pubDate + "\n" : "")
-        + (summary ? "\n\uD83D\uDCDD " + summary + "\n" : "")
-        + (item.link ? "\n\uD83D\uDD17 <a href=\"" + item.link + "\">رابط الخبر</a>" : "");
+    if (firstId && firstId !== lastRssId) {
+      for (const item of items) {
+        const id = item.guid || item.link || item.title;
+        if (id === lastRssId) break;
 
-      await sendTelegram(env, msg);
-      await env.SENT_IDS.put(id);
-      count++;
-      await new Promise(r => setTimeout(r, 1000));
+        const summary = item.description ? stripHtml(item.description).substring(0, 300) : "";
+        const msg = "\uD83D\uDCF0 <b>مستجدات | وزارة التربية الوطنية</b>\n\n"
+          + "\uD83D\uDD39 <b>العنوان:</b> " + item.title + "\n"
+          + (item.pubDate ? "\uD83D\uDCC5 <b>التاريخ:</b> " + item.pubDate + "\n" : "")
+          + (summary ? "\n\uD83D\uDCDD " + summary + "\n" : "")
+          + (item.link ? "\n\uD83D\uDD17 <a href=\"" + item.link + "\">رابط الخبر</a>" : "");
+
+        await sendTelegram(env, msg);
+        count++;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      await env.SENT_IDS.put("last_rss_id", firstId);
     }
   } catch (e) {
     console.error("RSS failed:", e.message);
@@ -146,19 +148,24 @@ async function checkAll(env) {
       const html = await resp.text();
       const items = parseScrapePage(html, page);
 
-      for (const item of items) {
-        const id = page.name + "_" + item.title;
-        if (sentIds.has(id)) continue;
+      const kvKey = "last_" + page.name;
+      const lastTitle = await env.SENT_IDS.get(kvKey);
+      const firstTitle = items.length > 0 ? items[0].title : "";
 
-        const msg = page.emoji + " <b>" + page.name + " | وزارة التربية الوطنية</b>\n\n"
-          + "\uD83D\uDD39 <b>العنوان:</b> " + item.title + "\n"
-          + (item.date ? "\uD83D\uDCC5 <b>التاريخ:</b> " + item.date + "\n" : "")
-          + (item.link ? "\n\uD83D\uDD17 <a href=\"" + item.link + "\">رابط الخبر</a>" : "");
+      if (firstTitle && firstTitle !== lastTitle) {
+        for (const item of items) {
+          if (item.title === lastTitle) break;
 
-        await sendTelegram(env, msg);
-        await env.SENT_IDS.put(id);
-        count++;
-        await new Promise(r => setTimeout(r, 1000));
+          const msg = page.emoji + " <b>" + page.name + " | وزارة التربية الوطنية</b>\n\n"
+            + "\uD83D\uDD39 <b>العنوان:</b> " + item.title + "\n"
+            + (item.date ? "\uD83D\uDCC5 <b>التاريخ:</b> " + item.date + "\n" : "")
+            + (item.link ? "\n\uD83D\uDD17 <a href=\"" + item.link + "\">رابط الخبر</a>" : "");
+
+          await sendTelegram(env, msg);
+          count++;
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        await env.SENT_IDS.put(kvKey, firstTitle);
       }
     } catch (e) {
       console.error("Scrape failed for " + page.name + ":", e.message);
@@ -205,19 +212,24 @@ async function handleMessage(message, env) {
       await sendTelegram(env, "\uD83D\uDD14 تم إرسال " + count + " خبر/أخبار جديدة.", chatId);
     }
   } else if (text === "/status") {
-    const keys = await env.SENT_IDS.list();
-    const total = keys.keys.length;
+    const rssLast = await env.SENT_IDS.get("last_rss_id");
+    let sourcesTracked = rssLast ? 1 : 0;
+    for (const page of PAGES) {
+      const v = await env.SENT_IDS.get("last_" + page.name);
+      if (v) sourcesTracked++;
+    }
     await sendTelegram(env,
       "\uD83D\uDCCA <b>حالة البوت</b>\n\n"
       + "\uD83C\uDF10 مصادر: RSS + " + PAGES.length + " صفحات\n"
-      + "\uD83D\uDCCB أخبار مسجلة: " + total + "\n"
-      + "\u23F0 التوقيت: كل 5 دقائق",
+      + "\uD83D\uDD04 مصادر مُتعقبة: " + sourcesTracked + "/" + (PAGES.length + 1) + "\n"
+      + "\u23F0 التوقيت: كل 5 دقائق\n\n"
+      + "\u2705 البوت يعمل ويتحقق فقط عند وجود أخبار جديدة",
       chatId
     );
   } else if (text === "/reset") {
-    const keys = await env.SENT_IDS.list();
-    for (const key of keys.keys) {
-      await env.SENT_IDS.delete(key.name);
+    await env.SENT_IDS.delete("last_rss_id");
+    for (const page of PAGES) {
+      await env.SENT_IDS.delete("last_" + page.name);
     }
     await sendTelegram(env, "\uD83D\uDD04 تم مسح السجل. جاري فحص جديد...", chatId);
     const count = await checkAll(env);
