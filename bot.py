@@ -2,8 +2,10 @@ import os
 import json
 import time
 import logging
+import threading
 import feedparser
 import requests
+from flask import Flask
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +30,16 @@ PAGES_TO_SCRAPE = [
     {"name": "طلبات العروض", "url": f"{BASE_URL}/%D8%B7%D9%84%D8%A8%D8%A7%D8%AA-%D8%A7%D9%84%D8%B9%D8%B1%D9%88%D8%B6", "emoji": "💼"},
     {"name": "بلاغات", "url": f"{BASE_URL}/%D8%A8%D9%84%D8%A7%D8%BA%D8%A7%D8%AA", "emoji": "📋"},
 ]
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "MEN.GOV.MA Telegram Bot is running!"
+
+@app.route("/health")
+def health():
+    return "ok"
 
 
 def load_sent():
@@ -221,11 +233,17 @@ def main():
     logger.info(f"Bot started. Checking every {CHECK_INTERVAL} seconds.")
     logger.info(f"Monitoring: RSS feed + {len(PAGES_TO_SCRAPE)} pages")
 
-    check_all()
-
-    while True:
-        time.sleep(CHECK_INTERVAL)
+    def run_bot():
         check_all()
+        while True:
+            time.sleep(CHECK_INTERVAL)
+            check_all()
+
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+
+    port = int(os.environ.get("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
