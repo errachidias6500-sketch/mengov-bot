@@ -83,6 +83,12 @@ public class Main {
         sentIds.addAll(loadSentIds());
 
         System.out.println("=== MEN.GOV.MA Telegram Bot (Java) ===");
+
+        if (!verifyBotToken()) {
+            System.err.println("Check your TELEGRAM_BOT_TOKEN in .env");
+            return;
+        }
+
         System.out.println("Monitoring RSS feed + " + PAGES.size() + " pages");
         System.out.println("Checking every 5 minutes...");
         System.out.println("Commands: /start /check /status /reset");
@@ -135,10 +141,37 @@ public class Main {
         return count;
     }
 
+    private static boolean verifyBotToken() {
+        try {
+            String url = "https://api.telegram.org/bot" + botToken + "/getMe";
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET().build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                Gson gson = new Gson();
+                Map<String, Object> json = gson.fromJson(response.body(), Map.class);
+                Map<String, Object> result = (Map<String, Object>) json.get("result");
+                String botName = result != null ? String.valueOf(result.get("first_name")) : "unknown";
+                System.out.println("Bot connected: @" + (result != null ? result.get("username") : "") + " (" + botName + ")");
+                return true;
+            } else {
+                System.err.println("Bot token invalid! Status: " + response.statusCode());
+                return false;
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to verify bot token: " + e.getMessage());
+            return false;
+        }
+    }
+
     private static void pollUpdates() {
+        System.out.println("[" + now() + "] Polling started, waiting for commands...");
         while (running) {
             try {
-                String url = "https://api.telegram.org/bot" + botToken + "/getUpdates?offset=" + lastUpdateId + "&timeout=30&allowed_updates=[\"message\"]";
+                String allowedUpdates = URLEncoder.encode("[\"message\"]", StandardCharsets.UTF_8);
+                String url = "https://api.telegram.org/bot" + botToken + "/getUpdates?offset=" + lastUpdateId + "&timeout=30&allowed_updates=" + allowedUpdates;
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .timeout(Duration.ofSeconds(35))
