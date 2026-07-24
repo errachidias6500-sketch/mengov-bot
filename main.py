@@ -136,29 +136,23 @@ def check_scrape_page(page_info, sent_ids):
             return new_items
 
         for tr in rows[:10]:
-            cells = tr.find_all("div")
-            if len(cells) < 2:
+            cells = [c for c in tr.children if hasattr(c, 'get_text')]
+            if len(cells) < 3:
                 cells = tr.find_all("td")
-            if len(cells) < 2:
+            if len(cells) < 3:
                 continue
 
-            date_cell = cells[0].get_text(strip=True) if cells else ""
-            title_cell = cells[1] if len(cells) > 1 else None
+            date_cell = cells[0].get_text(strip=True)
+            title = cells[1].get_text(strip=True)
             link = ""
-            title = ""
-            if title_cell:
-                a_tag = title_cell.find("a")
-                if a_tag:
-                    title = a_tag.get_text(strip=True)
-                    if title in ("عرض التفاصيل", "عرض", ""):
-                        title = title_cell.get_text(strip=True).replace("عرض التفاصيل", "").strip()
-                    href = a_tag.get("href", "")
-                    if href.startswith("/"):
-                        link = BASE_URL + href
-                    elif href.startswith("http"):
-                        link = href
-                else:
-                    title = title_cell.get_text(strip=True)
+
+            doc_a = cells[2].find("a")
+            if doc_a:
+                href = doc_a.get("href", "")
+                if href.startswith("/"):
+                    link = BASE_URL + href
+                elif href.startswith("http"):
+                    link = href
 
             if not title:
                 continue
@@ -167,20 +161,10 @@ def check_scrape_page(page_info, sent_ids):
             if item_id in sent_ids:
                 continue
 
-            doc_link = ""
-            if len(cells) > 2:
-                doc_a = cells[2].find("a")
-                if doc_a:
-                    href = doc_a.get("href", "")
-                    if href.startswith("/"):
-                        doc_link = BASE_URL + href
-                    elif href.startswith("http"):
-                        doc_link = href
-
             new_items.append({
                 "id": item_id,
                 "title": title,
-                "link": doc_link or link,
+                "link": link,
                 "date": date_cell,
                 "summary": "",
                 "source": page_info["name"],

@@ -177,28 +177,18 @@ public class Main {
             if (rows.isEmpty()) return messages;
 
             for (int i = 0; i < Math.min(rows.size(), 10); i++) {
-                Elements cells = rows.get(i).select("div");
-                if (cells.size() < 2) {
-                    cells = rows.get(i).select("td");
-                }
-                if (cells.size() < 2) continue;
+                Elements cells = rows.get(i).children();
+                if (cells.size() < 3) continue;
 
                 String date = cells.get(0).text().trim();
-                Element titleCell = cells.get(1);
-                String title = "";
+                String title = cells.get(1).text().trim();
                 String link = "";
 
-                Element aTag = titleCell.selectFirst("a");
-                if (aTag != null) {
-                    title = aTag.text().trim();
-                    if (title.equals("عرض التفاصيل") || title.equals("عرض") || title.isEmpty()) {
-                        title = cells.size() > 1 ? cells.get(1).text().trim().replace("عرض التفاصيل", "").trim() : "";
-                    }
-                    String href = aTag.attr("href");
+                Element docA = cells.get(2).selectFirst("a");
+                if (docA != null) {
+                    String href = docA.attr("href");
                     if (href.startsWith("/")) link = BASE_URL + href;
                     else if (href.startsWith("http")) link = href;
-                } else {
-                    title = titleCell.text().trim();
                 }
 
                 if (title.isEmpty()) continue;
@@ -206,22 +196,10 @@ public class Main {
                 String id = pageInfo.get("name") + "_" + title;
                 if (sentIds.contains(id)) continue;
 
-                String docLink = "";
-                if (cells.size() > 2) {
-                    Element docA = cells.get(2).selectFirst("a");
-                    if (docA != null) {
-                        String href = docA.attr("href");
-                        if (href.startsWith("/")) docLink = BASE_URL + href;
-                        else if (href.startsWith("http")) docLink = href;
-                    }
-                }
-
-                String finalLink = docLink.isEmpty() ? link : docLink;
-
                 String msg = pageInfo.get("emoji") + " <b>" + pageInfo.get("name") + " | وزارة التربية الوطنية</b>\n\n"
                         + "\uD83D\uDD39 <b>العنوان:</b> " + title + "\n"
                         + (date.isEmpty() ? "" : "\uD83D\uDCC5 <b>التاريخ:</b> " + date + "\n")
-                        + (finalLink.isEmpty() ? "" : "\n\uD83D\uDD17 <a href=\"" + finalLink + "\">رابط الخبر</a>");
+                        + (link.isEmpty() ? "" : "\n\uD83D\uDD17 <a href=\"" + link + "\">رابط الخبر</a>");
 
                 sendTelegram(msg);
                 sentIds.add(id);
